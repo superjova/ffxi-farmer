@@ -56,9 +56,13 @@ local function resolveName(itemId)
     if mgr == nil then return nil end
     local item = mgr:GetItemById(itemId)
     if item == nil then return nil end
-    return item.Name[0]
+    local name = item.Name[0]
+    if name == nil or name == '' then name = item.Name[1] end
+    if name == nil or name == '' then return nil end
+    return name
 end
 
+ctx.resolveName = resolveName
 tracker.setup({ session = session, resolveName = resolveName, logfn = print })
 
 -- Let the UI's Reset button also clear the packet-dedupe state.
