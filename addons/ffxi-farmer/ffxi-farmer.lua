@@ -34,8 +34,8 @@ local ui       = require('ui')
 -- ---------------------------------------------------------------------------
 -- State
 -- ---------------------------------------------------------------------------
-local config = settings.load({ visible = true })
-local priceData = settings.load({ items = {} }, 'prices')
+local config = settings.load(T{ visible = true })
+local priceData = settings.load(T{ items = T{} }, 'prices')
 
 local prices = Prices.new(priceData, function() settings.save('prices') end)
 local session = Session.new(prices:priceFn())
