@@ -115,8 +115,14 @@ end
 ui.render = function(ctx)
     if not ctx.visible[1] then return end
 
+    -- gil/hr and total live in the title bar (with a stable '###' id) so they stay
+    -- visible even when the window is collapsed/minimized.
+    local session = ctx.session
+    local title = string.format('Farmer  %s gil/hr  |  %s total###ffxifarmer',
+        util.commas(math.floor(session:gilPerHour())), util.commas(session:total()))
+
     imgui.SetNextWindowSize({ 320, 0 }, ImGuiCond_FirstUseEver)
-    if imgui.Begin('ffxi-farmer', ctx.visible, ImGuiWindowFlags_NoFocusOnAppearing) then
+    if imgui.Begin(title, ctx.visible, ImGuiWindowFlags_NoFocusOnAppearing) then
         renderBar(ctx)
         imgui.Separator()
         renderControls(ctx)
