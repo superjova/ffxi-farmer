@@ -143,5 +143,53 @@ do
 end
 
 -- ---------------------------------------------------------------------------
+-- tracker: gil from the 0x02D kill-message packet (tiny struct shim so the
+-- packet parser can run under stock Lua without the Ashita 'struct' library)
+-- ---------------------------------------------------------------------------
+do
+    package.preload['struct'] = function()
+        return {
+            unpack = function(fmt, data, pos)
+                local n = (fmt == 'B') and 1 or ((fmt == 'H') and 2 or 4)
+                local v = 0
+                for i = 0, n - 1 do
+                    v = v + string.byte(data, pos + i) * (256 ^ i)
+                end
+                return v
+            end,
+        }
+    end
+    local tracker = require('tracker')
+
+    -- Build a fake 0x02D packet: param1@0x10 (u32), msgId@0x18 (u16).
+    local function pkt2d(param1, msgId)
+        local b = {}
+        for i = 1, 0x1A do b[i] = 0 end
+        for i = 0, 3 do b[0x10 + i + 1] = math.floor(param1 / (256 ^ i)) % 256 end
+        for i = 0, 1 do b[0x18 + i + 1] = math.floor(msgId  / (256 ^ i)) % 256 end
+        local parts = {}
+        for i = 1, #b do parts[i] = string.char(b[i]) end
+        return table.concat(parts)
+    end
+
+    local s = Session.new(function() return nil end)
+    tracker.setup({ session = s, resolveName = function() return nil end, logfn = function() end })
+
+    tracker.gilMessageId = 565
+    tracker.onKillMessage(pkt2d(1000, 565))
+    check('2D gil ignored when not running', s.gilDropped == 0)
+
+    s:start()
+    tracker.onKillMessage(pkt2d(9999, 7))      -- e.g. an XP message, different id
+    check('2D ignores non-gil message id', s.gilDropped == 0)
+    tracker.onKillMessage(pkt2d(5000, 565))    -- the gil message
+    check('2D counts gil for matching id', s.gilDropped == 5000)
+
+    tracker.gilMessageId = nil
+    tracker.onKillMessage(pkt2d(100, 565))
+    check('2D ignores gil when id unset', s.gilDropped == 5000)
+end
+
+-- ---------------------------------------------------------------------------
 print(string.format('\n%d passed, %d failed', passed, failed))
 os.exit(failed == 0 and 0 or 1)

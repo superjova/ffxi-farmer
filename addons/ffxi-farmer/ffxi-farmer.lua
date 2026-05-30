@@ -34,7 +34,7 @@ local ui       = require('ui')
 -- ---------------------------------------------------------------------------
 -- State
 -- ---------------------------------------------------------------------------
-local config = settings.load(T{ visible = true })
+local config = settings.load(T{ visible = true, gilMessageId = 0 })
 local priceData = settings.load(T{ items = T{} }, 'prices')
 
 local prices = Prices.new(priceData, function() settings.save('prices') end)
@@ -62,23 +62,10 @@ local function resolveName(itemId)
     return name
 end
 
--- Read the player's current gil from game memory (inventory container 0, slot 0,
--- item id 0xFFFF). Server-driven; session:observeGil turns increases into income.
-local function getGil()
-    if AshitaCore == nil then return nil end
-    local mm = AshitaCore:GetMemoryManager()
-    if mm == nil then return nil end
-    local inv = mm:GetInventory()
-    if inv == nil then return nil end
-    -- Container 0 / slot 0 is always gil in FFXI. Support both binding names.
-    local item = inv.GetContainerItem and inv:GetContainerItem(0, 0)
-        or (inv.GetItem and inv:GetItem(0, 0))
-    if item == nil then return nil end
-    return item.Count
-end
-
 ctx.resolveName = resolveName
 tracker.setup({ session = session, resolveName = resolveName, logfn = print })
+tracker.gilMessageId = (config.gilMessageId and config.gilMessageId > 0)
+    and config.gilMessageId or nil
 
 -- Let the UI's Reset button also clear the packet-dedupe state.
 ui.onReset = function() tracker.reset() end
@@ -93,6 +80,7 @@ local function printHelp()
     msg('  /farmer price <amount> - price the first untracked item')
     msg('  /farmer setprice <id|name> <amount>')
     msg('  /farmer add <amount>   - manually add gil')
+    msg('  /farmer gilmsg <id>    - set the "obtains gil" message id (see debug)')
     msg('  /farmer debug          - toggle packet logging')
 end
 
@@ -157,6 +145,17 @@ local function handleCommand(args)
             session:addGil(amt)
             msg(string.format('added %s gil.', require('util').commas(amt)))
         end
+    elseif sub == 'gilmsg' then
+        local id = tonumber(args[3])
+        if id == nil or id <= 0 then
+            local cur = tracker.gilMessageId and tostring(tracker.gilMessageId) or 'unset'
+            msg('gil message id is ' .. cur .. '. usage: /farmer gilmsg <id>')
+        else
+            tracker.gilMessageId = id
+            config.gilMessageId = id
+            settings.save()
+            msg('gil message id set to ' .. id .. ' (saved). gil will now track.')
+        end
     elseif sub == 'debug' then
         tracker.debug = not tracker.debug
         msg('packet debug ' .. (tracker.debug and 'ON' or 'OFF') .. '.')
@@ -183,20 +182,7 @@ ashita.events.register('packet_in', 'ffxifarmer_packet', function(e)
     tracker.onPacket(e.id, e.data)
 end)
 
--- Gil is server-driven: poll the live gil total (throttled) and let the session
--- turn any increase into income while a session is running.
-local lastGilPoll = 0
 ashita.events.register('d3d_present', 'ffxifarmer_present', function()
-    local now = os.clock()
-    if now - lastGilPoll >= 0.5 then
-        lastGilPoll = now
-        local g = getGil()
-        if tracker.debug then
-            print(string.format('[ffxi-farmer] gil read=%s dropped=%d',
-                tostring(g), session.gilDropped))
-        end
-        session:observeGil(g)
-    end
     ui.render(ctx)
 end)
 

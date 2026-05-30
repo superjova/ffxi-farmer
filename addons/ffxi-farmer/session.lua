@@ -31,7 +31,6 @@ function Session:reset()
     self.gilDropped = 0
     self.items = {}   -- [itemId] = { name = string, qty = number }
     self.order = {}   -- insertion order of itemIds for stable UI listing
-    self._gilWatermark = nil   -- last observed raw gil total (for delta tracking)
 end
 
 function Session:start()
@@ -78,28 +77,6 @@ function Session:addGil(amount)
     amount = tonumber(amount)
     if not amount or amount <= 0 then return end
     self.gilDropped = self.gilDropped + amount
-end
-
--- Observe the player's CURRENT raw gil total (read from game memory) and add any
--- increase to the session. This is the server-driven source of truth for gil - no
--- chat parsing. While not running we drop the watermark so gil earned/spent outside
--- the session is never counted, and re-baseline on the next running observation.
-function Session:observeGil(currentGil)
-    currentGil = tonumber(currentGil)
-    if currentGil == nil then return end
-    if self.state ~= Session.RUNNING then
-        self._gilWatermark = nil
-        return
-    end
-    if self._gilWatermark == nil then
-        self._gilWatermark = currentGil   -- baseline; don't count pre-existing gil
-        return
-    end
-    if currentGil > self._gilWatermark then
-        self:addGil(currentGil - self._gilWatermark)
-    end
-    -- Track the watermark down too, so selling/spending doesn't later double-count.
-    self._gilWatermark = currentGil
 end
 
 function Session:addItem(itemId, name, qty)
