@@ -47,9 +47,7 @@ local function renderBar(ctx)
     imgui.SameLine()
     imgui.Text(string.format('  |  %s', util.hms(session:elapsedSeconds())))
 
-    local stateLabel = ({
-        [0] = 'stopped', [1] = 'running', [2] = 'paused',
-    })[session.state] or '?'
+    local stateLabel = session.state or '?'
     imgui.Text(string.format('Gil dropped: %s   Item value: %s   [%s]',
         util.commas(session.gilDropped),
         util.commas(session:itemValue()),
@@ -59,7 +57,7 @@ end
 local function renderControls(ctx)
     local session = ctx.session
     if imgui.Button('Start') then
-        if session.state == 2 then session:resume() else session:start() end
+        if session.state == session.PAUSED then session:resume() else session:start() end
     end
     imgui.SameLine()
     if imgui.Button('Pause') then session:pause() end
@@ -115,8 +113,14 @@ end
 ui.render = function(ctx)
     if not ctx.visible[1] then return end
 
+    -- gil/hr and total live in the title bar (with a stable '###' id) so they stay
+    -- visible even when the window is collapsed/minimized.
+    local session = ctx.session
+    local title = string.format('Farmer  %s gil/hr  |  %s total###ffxifarmer',
+        util.commas(math.floor(session:gilPerHour())), util.commas(session:total()))
+
     imgui.SetNextWindowSize({ 320, 0 }, ImGuiCond_FirstUseEver)
-    if imgui.Begin('ffxi-farmer', ctx.visible, ImGuiWindowFlags_NoFocusOnAppearing) then
+    if imgui.Begin(title, ctx.visible, ImGuiWindowFlags_NoFocusOnAppearing) then
         renderBar(ctx)
         imgui.Separator()
         renderControls(ctx)

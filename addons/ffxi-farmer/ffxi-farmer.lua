@@ -168,6 +168,11 @@ ashita.events.register('packet_in', 'ffxifarmer_packet', function(e)
     tracker.onPacket(e.id, e.data)
 end)
 
+-- Gil isn't in the loot packet, so read it from the chat line ("You obtain N gil").
+ashita.events.register('text_in', 'ffxifarmer_text', function(e)
+    tracker.onText(e.message)
+end)
+
 ashita.events.register('d3d_present', 'ffxifarmer_present', function()
     ui.render(ctx)
 end)

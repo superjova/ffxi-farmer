@@ -1,14 +1,18 @@
 --[[
-    tracker.lua - parse the incoming treasure-pool packet (0x0D2) and feed the
-    session. For a solo farmer, an item/gil entering the treasure pool means you
-    obtain it, so 0x0D2 is the signal we watch.
+    tracker.lua - record loot for the session from two sources:
 
-    Confirmed offsets (Lootwhore plugin + emulator sources):
-      0x04 uint32  gold/gil amount (set when the drop is gil; item id is then 0)
-      0x10 uint16  item id
-      0x12 uint16  count
-      0x14 uint8   treasure pool slot index
-    Count/dropper offsets are best confirmed live via `/farmer debug` on your server.
+    1. Items: the incoming treasure-pool packet (0x0D2). For a solo farmer an item
+       entering the pool means you obtain it, so 0x0D2 is the signal we watch.
+       Offsets (confirmed via the Lootwhore plugin + LandSandBoat packet source):
+         0x04 uint32  item quantity
+         0x10 uint16  item id (0 == empty/cleared slot)
+         0x14 uint8   treasure pool slot index
+
+    2. Gil: gil does NOT reliably ride in 0x0D2 (the pool gil field is unused on
+       most servers), so gil is read from the chat line instead - see onText, which
+       matches "you obtain/receive N gil". This is robust across servers.
+
+    Run `/farmer debug` to dump raw 0x0D2 bytes if an item field still looks wrong.
 ]]--
 
 local struct = require('struct')
@@ -20,8 +24,18 @@ tracker.resolveName = nil
 tracker.debug = false
 tracker.logfn = print
 
+local MAX_STACK = 99   -- treasure-pool items are 1..99; anything else is a misread
+
+local function hexdump(data, n)
+    local out = {}
+    for i = 1, math.min(n, #data) do
+        out[i] = string.format('%02X', string.byte(data, i))
+    end
+    return table.concat(out, ' ')
+end
+
 -- Dedupe: 0x0D2 can be re-sent (e.g. on pool re-sync). Suppress an identical
--- (slot,item,count) that arrives within a short window of the last identical one.
+-- (slot,item) that arrives within a short window of the last identical one.
 -- A real re-drop into the same slot lands outside this window and still counts.
 local DEDUPE_WINDOW = 1.0
 local recent = {}   -- key -> timestamp
@@ -44,30 +58,55 @@ function tracker.onPacket(id, data)
     if session == nil or not session:isRunning() then return end
     if data == nil or #data < 0x16 then return end
 
-    local gold   = struct.unpack('I', data, 0x04 + 1)
+    local count  = struct.unpack('I', data, 0x04 + 1)   -- item quantity
     local itemId = struct.unpack('H', data, 0x10 + 1)
-    local count  = struct.unpack('H', data, 0x12 + 1)
     local slot   = struct.unpack('B', data, 0x14 + 1)
 
     if tracker.debug then
-        tracker.logfn(string.format('[ffxi-farmer] 0xD2 gold=%d item=%d count=%d slot=%d',
-            gold or -1, itemId or -1, count or -1, slot or -1))
+        tracker.logfn(string.format('[ffxi-farmer] 0xD2 item=%d count=%d slot=%d | %s',
+            itemId or -1, count or -1, slot or -1, hexdump(data, 0x1C)))
     end
 
-    local key = string.format('%d:%d:%d', slot or 0, itemId or 0, count or 0)
+    -- Ignore empty-slot / pool-clear packets so they can't add phantom totals.
+    if itemId == nil or itemId == 0 then return end
+
+    -- Suppress re-sent pool packets for the same slot/item within a short window.
+    local key = string.format('%d:%d', slot or 0, itemId)
     local now = clock()
     if recent[key] and (now - recent[key]) < DEDUPE_WINDOW then
         return
     end
     recent[key] = now
 
-    if (itemId == nil or itemId == 0) and gold and gold > 0 then
-        session:addGil(gold)
-    elseif itemId and itemId > 0 then
-        local name = tracker.resolveName and tracker.resolveName(itemId) or nil
-        local qty = (count and count > 0) and count or 1
-        session:addItem(itemId, name, qty)
+    -- Guard against a misread count (e.g. the old x191 bug): clamp to a sane
+    -- stack size, defaulting to 1 for anything out of range.
+    local qty = count or 1
+    if qty < 1 or qty > MAX_STACK then qty = 1 end
+
+    local name = tracker.resolveName and tracker.resolveName(itemId) or nil
+    session:addItem(itemId, name, qty)
+end
+
+-- Gil from the chat log: "You obtain 123 gil." / "You receive 123 gil ...".
+-- Returns the parsed amount (for tests) or nil.
+function tracker.onText(text)
+    local session = tracker.session
+    if session == nil or not session:isRunning() then return nil end
+    if text == nil then return nil end
+
+    local lower = text:lower()
+    local digits = lower:match('obtain[s]?%s+([%d,]+)%s+gil')
+        or lower:match('receive[s]?%s+([%d,]+)%s+gil')
+    if digits == nil then return nil end
+
+    local amount = tonumber((digits:gsub(',', '')))
+    if amount == nil or amount <= 0 then return nil end
+
+    if tracker.debug then
+        tracker.logfn(string.format('[ffxi-farmer] gil +%d  (%s)', amount, text))
     end
+    session:addGil(amount)
+    return amount
 end
 
 return tracker
