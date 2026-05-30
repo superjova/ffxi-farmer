@@ -1,9 +1,7 @@
 --[[
-    ui.lua - the ImGui HUD: the always-on stats bar plus two collapsible panels
-    (untracked items awaiting a price, and tracked items with editable prices).
-
-    Pure-ish: render(ctx) reads from ctx.session / ctx.prices every frame. All the
-    persistence lives in prices/settings; here we only call into them.
+    ui.lua - the ImGui HUD: a single draggable window. The title bar carries the
+    live total + gil/hr (so it stays useful when collapsed/minimized); the expanded
+    body is a vertical breakdown, the session controls, and the two pricing panels.
 ]]--
 
 local imgui = require('imgui')
@@ -15,12 +13,6 @@ local ui = { onReset = nil }
 -- Remembered across frames so the untracked panel only auto-collapses on the
 -- frame its list becomes empty (not every time a single item is priced).
 local prevUntrackedCount = 0
-
-local function fmtRate(session)
-    local secs = session:elapsedSeconds()
-    if secs <= 0 then return '0' end
-    return util.commas(math.floor(session:gilPerHour()))
-end
 
 -- Show the real item name. Names are resolved lazily from the resource manager
 -- (via ctx.resolveName) in case they weren't available when the drop arrived,
@@ -39,19 +31,12 @@ local function displayName(ctx, entry)
     return nm or ('Item ' .. tostring(entry.itemId))
 end
 
-local function renderBar(ctx)
+-- Vertical breakdown. Deliberately omits total + gil/hr (those live in the title).
+local function renderBreakdown(ctx)
     local session = ctx.session
-    imgui.Text(string.format('Gil/hr: %s', fmtRate(session)))
-    imgui.SameLine()
-    imgui.Text(string.format('  |  Total: %s', util.commas(session:total())))
-    imgui.SameLine()
-    imgui.Text(string.format('  |  %s', util.hms(session:elapsedSeconds())))
-
-    local stateLabel = session.state or '?'
-    imgui.Text(string.format('Gil dropped: %s   Item value: %s   [%s]',
-        util.commas(session.gilDropped),
-        util.commas(session:itemValue()),
-        stateLabel))
+    imgui.Text(string.format('Time:  %s', util.hms(session:elapsedSeconds())))
+    imgui.Text(string.format('Items: %s gil', util.commas(session:itemValue())))
+    imgui.Text(string.format('Gil:   %s gil', util.commas(session.gilDropped)))
 end
 
 local function renderControls(ctx)
@@ -77,10 +62,8 @@ local function renderUntracked(ctx)
     local n = #list
 
     -- Auto-collapse only on the transition to empty, so pricing one item leaves
-    -- the panel open with the remaining items still listed. The '###id' suffix
-    -- gives the header a stable ImGui id even though the visible count changes;
-    -- without it the header would reset to collapsed every time the count moved
-    -- (which is why the whole panel used to snap shut after each Save).
+    -- the panel open with the remaining items. The '###id' suffix keeps a stable
+    -- ImGui id even as the visible count changes (else it would snap shut on save).
     if n == 0 and prevUntrackedCount > 0 and imgui.SetNextItemOpen ~= nil then
         imgui.SetNextItemOpen(false)
     end
@@ -112,16 +95,23 @@ end
 
 ui.render = function(ctx)
     if not ctx.visible[1] then return end
-
-    -- gil/hr and total live in the title bar (with a stable '###' id) so they stay
-    -- visible even when the window is collapsed/minimized.
     local session = ctx.session
-    local title = string.format('Farmer  %s gil/hr  |  %s total###ffxifarmer',
-        util.commas(math.floor(session:gilPerHour())), util.commas(session:total()))
+
+    -- Title: "Farmer | <total> (<rate>/hr)" while a session is live (running or
+    -- paused), otherwise just "Farmer". Stable '###' id preserves window identity
+    -- and saved position even though the visible title changes.
+    local title
+    if session.state ~= 'stopped' then
+        title = string.format('Farmer | %s (%s/hr)###ffxifarmer',
+            util.commas(session:total()),
+            util.commas(math.floor(session:gilPerHour())))
+    else
+        title = 'Farmer###ffxifarmer'
+    end
 
     imgui.SetNextWindowSize({ 320, 0 }, ImGuiCond_FirstUseEver)
     if imgui.Begin(title, ctx.visible, ImGuiWindowFlags_NoFocusOnAppearing) then
-        renderBar(ctx)
+        renderBreakdown(ctx)
         imgui.Separator()
         renderControls(ctx)
         imgui.Separator()
