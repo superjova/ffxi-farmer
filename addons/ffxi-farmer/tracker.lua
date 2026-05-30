@@ -8,9 +8,9 @@
          0x10 uint16  item id (0 == empty/cleared slot)
          0x14 uint8   treasure pool slot index
 
-    2. Gil: gil does NOT reliably ride in 0x0D2 (the pool gil field is unused on
-       most servers), so gil is read from the chat line instead - see onText, which
-       matches "you obtain/receive N gil". This is robust across servers.
+    Gil is handled separately (and server-driven) by session:observeGil, fed from
+    the player's live gil total read out of game memory - not from this packet and
+    not from chat text.
 
     Run `/farmer debug` to dump raw 0x0D2 bytes if an item field still looks wrong.
 ]]--
@@ -85,28 +85,6 @@ function tracker.onPacket(id, data)
 
     local name = tracker.resolveName and tracker.resolveName(itemId) or nil
     session:addItem(itemId, name, qty)
-end
-
--- Gil from the chat log: "You obtain 123 gil." / "You receive 123 gil ...".
--- Returns the parsed amount (for tests) or nil.
-function tracker.onText(text)
-    local session = tracker.session
-    if session == nil or not session:isRunning() then return nil end
-    if text == nil then return nil end
-
-    local lower = text:lower()
-    local digits = lower:match('obtain[s]?%s+([%d,]+)%s+gil')
-        or lower:match('receive[s]?%s+([%d,]+)%s+gil')
-    if digits == nil then return nil end
-
-    local amount = tonumber((digits:gsub(',', '')))
-    if amount == nil or amount <= 0 then return nil end
-
-    if tracker.debug then
-        tracker.logfn(string.format('[ffxi-farmer] gil +%d  (%s)', amount, text))
-    end
-    session:addGil(amount)
-    return amount
 end
 
 return tracker

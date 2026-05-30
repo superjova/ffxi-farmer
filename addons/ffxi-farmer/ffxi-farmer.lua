@@ -62,6 +62,19 @@ local function resolveName(itemId)
     return name
 end
 
+-- Read the player's current gil from game memory (inventory container 0, slot 0,
+-- item id 0xFFFF). Server-driven; session:observeGil turns increases into income.
+local function getGil()
+    if AshitaCore == nil then return nil end
+    local mm = AshitaCore:GetMemoryManager()
+    if mm == nil then return nil end
+    local inv = mm:GetInventory()
+    if inv == nil then return nil end
+    local item = inv:GetContainerItem(0, 0)
+    if item == nil or item.Id ~= 0xFFFF then return nil end
+    return item.Count
+end
+
 ctx.resolveName = resolveName
 tracker.setup({ session = session, resolveName = resolveName, logfn = print })
 
@@ -168,12 +181,15 @@ ashita.events.register('packet_in', 'ffxifarmer_packet', function(e)
     tracker.onPacket(e.id, e.data)
 end)
 
--- Gil isn't in the loot packet, so read it from the chat line ("You obtain N gil").
-ashita.events.register('text_in', 'ffxifarmer_text', function(e)
-    tracker.onText(e.message)
-end)
-
+-- Gil is server-driven: poll the live gil total (throttled) and let the session
+-- turn any increase into income while a session is running.
+local lastGilPoll = 0
 ashita.events.register('d3d_present', 'ffxifarmer_present', function()
+    local now = os.clock()
+    if now - lastGilPoll >= 0.5 then
+        lastGilPoll = now
+        session:observeGil(getGil())
+    end
     ui.render(ctx)
 end)
 
