@@ -70,8 +70,10 @@ local function getGil()
     if mm == nil then return nil end
     local inv = mm:GetInventory()
     if inv == nil then return nil end
-    local item = inv:GetContainerItem(0, 0)
-    if item == nil or item.Id ~= 0xFFFF then return nil end
+    -- Container 0 / slot 0 is always gil in FFXI. Support both binding names.
+    local item = inv.GetContainerItem and inv:GetContainerItem(0, 0)
+        or (inv.GetItem and inv:GetItem(0, 0))
+    if item == nil then return nil end
     return item.Count
 end
 
@@ -188,7 +190,12 @@ ashita.events.register('d3d_present', 'ffxifarmer_present', function()
     local now = os.clock()
     if now - lastGilPoll >= 0.5 then
         lastGilPoll = now
-        session:observeGil(getGil())
+        local g = getGil()
+        if tracker.debug then
+            print(string.format('[ffxi-farmer] gil read=%s dropped=%d',
+                tostring(g), session.gilDropped))
+        end
+        session:observeGil(g)
     end
     ui.render(ctx)
 end)
